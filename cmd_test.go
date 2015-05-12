@@ -20,6 +20,7 @@ type Permutation struct {
 }
 
 var briefs = map[int64]Brief{
+	121: {"/bin/ls", "-l"},
 	123: {"/bin/ls", "-l"},
 	124: {"/bin/ls", "-l {{WHAT}}"},
 	125: {"/bin/ls", "-l {{WHAT}} [{{EVER}}]"},
@@ -35,6 +36,7 @@ var briefs = map[int64]Brief{
 
 var perms = []Permutation{
 	{132, nil, 0, ErrNoSuchFile},
+	{121, nil, 0, nil},
 	{123, nil, 0, nil},
 	{124, &[]Param{{"WHAT", "*.blah"}}, 0, ErrNoSuchFile},
 	{124, &[]Param{{"WHAT", "*.go"}}, 0, nil},
@@ -43,13 +45,16 @@ var perms = []Permutation{
 	{126, &[]Param{{"WHAT", "$LOGNAME"}}, 0, nil},
 	{127, nil, 0, nil},
 	{128, nil, 23, nil},
-	{129, nil, 0, nil},
+	//{129, nil, 0, nil},
 	{130, nil, 0, nil},
 	{131, nil, 1, nil},
 	{133, nil, 0, nil},
 }
 
-var cmds = make(map[int64]Command)
+var (
+	asyncResults = make(chan Runtime, 1)
+	cmds         = make(map[int64]Command)
+)
 
 const (
 	forever = `#!/bin/bash
@@ -76,7 +81,7 @@ func init() {
 			c.Dir = "/tmp"
 		}
 		if k == 130 && os.Getuid() == 0 {
-			c.User = "Paul.Stuart"
+			c.User = os.Getenv("LOGNAME")
 		}
 		cmds[k] = c
 	}
@@ -94,7 +99,18 @@ func getCmd(t *testing.T, id int64) Command {
 
 func runner(t *testing.T, id int64, rc int, wants error, p ...Param) {
 	c := getCmd(t, id)
-	r, err := c.Run(p...)
+	if id <= 123 {
+		c.Async = true
+	}
+	var r Runtime
+	var err error
+	if c.Async {
+		err = c.RunAsync(asyncResults, p...)
+		r = <-asyncResults
+	} else {
+		r, err = c.Run(p...)
+	}
+
 	same := err != nil && wants != nil && strings.HasSuffix(err.Error(), wants.Error())
 
 	switch {
@@ -125,6 +141,7 @@ func TestPermutations(t *testing.T) {
 }
 
 func TestBackground(t *testing.T) {
+	t.SkipNow() // tends to clutter up
 	cmd := Command{Path: "./forever"}
 	pid, err := cmd.Background()
 	if err != nil {
